@@ -1,0 +1,406 @@
+#include "../Core/Base64.h"
+#include "../Core/MappedFile.h"
+#include "internal/ShaderDefinitions.h"
+#include "glTF.h"
+#include <iostream>
+#include <algorithm>
+
+using namespace std::literals;
+
+// ADT Helper methods
+namespace rapidjson
+{
+	template <typename Encoding, typename Allocator>
+	typename GenericValue<Encoding, Allocator>::ValueIterator begin(GenericValue<Encoding, Allocator> &v)
+	{
+		return v.Begin();
+	}
+	template <typename Encoding, typename Allocator>
+	typename GenericValue<Encoding, Allocator>::ConstValueIterator begin(const GenericValue<Encoding, Allocator> &v)
+	{
+		return v.Begin();
+	}
+
+	template <typename Encoding, typename Allocator>
+	typename GenericValue<Encoding, Allocator>::ValueIterator end(GenericValue<Encoding, Allocator> &v)
+	{
+		return v.End();
+	}
+	template <typename Encoding, typename Allocator>
+	typename GenericValue<Encoding, Allocator>::ConstValueIterator end(const GenericValue<Encoding, Allocator> &v)
+	{
+		return v.End();
+	}
+}
+
+template<typename S>
+inline bool jsonContainsFields(const rapidjson::Value &value, S &&fieldName)
+{
+	return !value.IsNull() && value.HasMember(std::forward<S>(fieldName));
+}
+
+template <typename S, typename... Strings>
+inline bool jsonContainsFields(const rapidjson::Value &value, S &&firstFieldName, Strings &&... restFieldNames)
+{
+	return !value.IsNull() && value.HasMember(std::forward<S>(firstFieldName)) && jsonContainsFields(value, std::forward<Strings>(restFieldNames)...);
+}
+
+/*
+template<typename... Strings, typename... Targets>
+inline bool json_tie(rapidjson::Value &value, std::pair<Targets &, Strings &&> &&keyValuePairs...)
+{
+	if (!jsonContainsFields(value, (keyValuePairs.second)...)
+	{
+		return false;
+	}
+
+
+
+	return true;
+}
+*/
+
+ge::gl4::GLTF::GLTF(const char *string)
+{
+	rapidjson::Document doc;
+	doc.Parse(string);
+
+	loadBuffers(doc);
+	loadBufferViews(doc);
+	loadShaders(doc);
+	loadSamplers(doc);
+	loadTextures(doc);
+	loadVertexFormats(doc);
+}
+
+void ge::gl4::GLTF::loadBuffers(const rapidjson::Document &doc)
+{
+	if(!jsonContainsFields(doc, "buffers"))
+	{
+		return;
+	}
+
+	for(auto it =  doc["bufferViews"].MemberBegin(); it != doc["bufferViews"].MemberEnd(); ++it)
+	{
+		const auto &b = it->value;
+		
+		// Check preconditions
+		if(!jsonContainsFields(b, "uri"))
+		{
+			continue;
+		}
+
+		auto uri	= b["uri"].GetString();
+		auto name	= it->name.GetString();
+		auto uriType	= UriType::ArrayBuffer;
+
+		const char base64Prefix[] = "data:application/octet-stream;base64,";
+		if(std::equal(base64Prefix, base64Prefix + sizeof(base64Prefix) - 1, uri))
+		{
+			uriType = UriType::Text;
+		}
+
+		switch(uriType)
+		{
+			case UriType::ArrayBuffer:
+			{
+				auto maybeFile = MappedFile::create(uri);
+				if(!maybeFile)
+				{
+					std::cerr << "Failed to open URI referenced by Buffer " << name << std::endl;
+					continue;
+				}
+				auto &file = *maybeFile;
+				Buffer result{file.size()};
+				result.upload(file.cdata());
+				buffers_.emplace(uri, std::move(result));
+				break;
+			}
+			case UriType::Text:
+			{
+				auto encodedBegin = uri + sizeof(base64Prefix);
+				auto encodedEnd   = uri + strlen(uri);
+
+				std::vector<uint8_t> decoded;
+				decoded.reserve(base64_size(encodedEnd - encodedBegin));
+				from_base64(encodedBegin, encodedEnd, std::back_inserter(decoded));
+
+				Buffer result{decoded.size()};
+				result.upload(decoded.data());
+				buffers_.emplace(uri, std::move(result));
+				break;
+			}
+		}
+	}
+}
+
+void ge::gl4::GLTF::loadBufferViews(const rapidjson::Document &doc)
+{
+	if(!jsonContainsFields(doc, "bufferViews"))
+	{
+		return;
+	}
+
+	for(auto it =  doc["bufferViews"].MemberBegin(); it != doc["bufferViews"].MemberEnd(); ++it)
+	{
+		const auto &b = it->value;
+		
+		// Check preconditions
+		if(!jsonContainsFields(b, "buffer", "byteOffset", "byteLength", "target"))
+		{
+			continue;
+		}
+
+		auto referredBuffer = b["buffer"].GetString();
+		auto bufferIt		= buffers_.find(referredBuffer);
+		Range range{b["byteOffset"].GetUint64(), b["byteLength"].GetUint64()};
+		auto target = static_cast<GLenum>(b["target"].GetInt());
+
+		if(bufferIt == buffers_.end())
+		{
+			std::cerr << "Referred Buffer not found: " << referredBuffer << std::endl;
+			continue;
+		}
+
+		bufferViews_.emplace(it->value.GetString(), BufferView{bufferIt->second, target, range});
+	}
+}
+
+void ge::gl4::GLTF::loadShaders(const rapidjson::Document &doc)
+{
+	if(!jsonContainsFields(doc, "shaders"))
+	{
+		return;
+	}
+
+	for(auto it =  doc["shaders"].MemberBegin(); it != doc["shaders"].MemberEnd(); ++it)
+	{
+		const auto &b = it->value;
+		
+		// Check preconditions
+		if(!jsonContainsFields(b, "type", "uri"))
+		{
+			continue;
+		}
+
+		auto uri	= b["uri"].GetString();
+		auto uriType	= UriType::ArrayBuffer;
+		auto shaderName = it->name.GetString();
+		auto shaderType = static_cast<Shader::Type>(b["type"].GetUint());
+
+		const char base64Prefix[] = "data:application/octet-stream;base64,";
+		if(std::equal(base64Prefix, base64Prefix + sizeof(base64Prefix) - 1, uri))
+		{
+			uriType = UriType::Text;
+		}
+
+		switch(uriType)
+		{
+			case UriType::ArrayBuffer:
+			{
+				auto maybeSourceFile = MappedFile::create(uri);
+				if(!maybeSourceFile)
+				{
+					std::cerr << "Failed to open URI referenced by Shader " << shaderName << std::endl;
+					continue;
+				}
+				auto &sourceFile = *maybeSourceFile;
+
+				auto maybeShader = Shader::create(shaderType, sourceFile.cdata(), sourceFile.size());
+				if(maybeShader.index() != 0)
+				{
+					std::cout << "Failed to compile:\n" << ranges::get<1>(maybeShader).what() << std::endl;
+					continue;
+				}
+
+				std::cout << "Compiling shader " << shaderName << ", source found at " << b["uri"].GetString() << std::endl;
+				shaders_.emplace(shaderName, std::move(ranges::get<0>(maybeShader)));
+				break;
+			}
+			case UriType::Text:
+			{
+				auto encodedBegin = uri + sizeof(base64Prefix);
+				auto encodedEnd   = uri + strlen(uri);
+
+				std::string decodedShaderSource;
+				decodedShaderSource.reserve(base64_size(encodedEnd - encodedBegin));
+				from_base64(encodedBegin, encodedEnd, std::back_inserter(decodedShaderSource));
+
+				auto maybeShader = Shader::create(shaderType, decodedShaderSource);
+				if(maybeShader.index() != 0)
+				{
+					std::cout << "Failed to compile:\n" << ranges::get<1>(maybeShader).what() << std::endl;
+					continue;
+				}
+
+				std::cout << "Compiling shader " << shaderName << ", source embedded in .glTF as base64" << std::endl;
+				shaders_.emplace(shaderName, std::move(ranges::get<0>(maybeShader)));
+				break;
+			}
+		}
+	}
+}
+
+void ge::gl4::GLTF::loadPrograms(const rapidjson::Document &doc)
+{
+	if(!jsonContainsFields(doc, "programs"))
+	{
+		return;
+	}
+	for(auto it =  doc["programs"].MemberBegin(); it != doc["programs"].MemberEnd(); ++it)
+	{
+		const auto &b = it->value;
+		if(!jsonContainsFields(b, "fragmentShader", "vertexShader"))
+		{
+			continue;
+		}
+			
+		auto name = it->name.GetString();
+		auto vShader = shaders_.find(it->value["vertexShader"].GetString());
+		auto fShader = shaders_.find(it->value["fragmentShader"].GetString());
+		
+		if(vShader == shaders_.end() || fShader == shaders_.end())
+		{
+			continue;
+		}
+	
+		ProgramPipeline pipeline;
+		pipeline.attach(vShader->second);
+		pipeline.attach(fShader->second);
+		programs_.emplace(name, std::move(pipeline));
+	}
+}
+
+void ge::gl4::GLTF::loadSamplers(const rapidjson::Document &doc)
+{
+	if(!jsonContainsFields(doc, "samplers"))
+	{
+		return;
+	}
+	for(auto it =  doc["samplers"].MemberBegin(); it != doc["samplers"].MemberEnd(); ++it)
+	{
+		const auto &b = it->value;
+
+		auto name = it->name.GetString();
+		GLenum minFilter = GL_LINEAR;
+		GLenum magFilter = GL_NEAREST_MIPMAP_LINEAR;
+		GLenum wrapS = GL_REPEAT;
+		GLenum wrapT = GL_REPEAT;
+
+		if(b["minFilter"].IsInt())
+		{
+			minFilter = (GLenum) b["minFilter"].GetInt();
+		}
+		if(b["magFilter"].IsInt())
+		{
+			magFilter = (GLenum) b["magFilter"].GetInt();
+		}
+		if(b["wrapS"].IsInt())
+		{
+			wrapS = (GLenum) b["wrapS"].GetInt();
+		}
+		if(b["wrapT"].IsInt())
+		{
+			wrapT = (GLenum) b["wrapT"].GetInt();
+		}
+		Sampler sampler;
+		sampler.set(GL_TEXTURE_MIN_FILTER, minFilter);
+		sampler.set(GL_TEXTURE_MAG_FILTER, magFilter);
+		sampler.set(GL_TEXTURE_WRAP_S, wrapS);
+		sampler.set(GL_TEXTURE_WRAP_T, wrapT);
+		samplers_.emplace(name, std::move(sampler));
+		
+		std::cout << __func__ << ":  Adding sampler " << name << ": " << (int) minFilter << " " << (int) magFilter << " " << (int) wrapS << " " << (int) wrapT << std::endl;
+	}
+}
+
+void ge::gl4::GLTF::loadTextures(const rapidjson::Document &doc)
+{
+	if(!jsonContainsFields(doc, "textures"))
+	{
+		return;
+	}
+
+	for(auto it =  doc["textures"].MemberBegin(); it != doc["textures"].MemberEnd(); ++it)
+	{
+		const auto &b = it->value;
+		if(!jsonContainsFields(b, "source", "sampler"))
+		{
+			continue;
+		}
+
+		auto name = it->name.GetString();
+		optional<Image> image;// = loadPNG(R"(picture.png)", ge::LoadAlpha::NO);
+		GLenum format = GL_RGBA;
+		GLenum internalFormat = GL_RGBA8;
+		/* GLenum target = GL_TEXTURE_2D; */
+		GLenum type = GL_UNSIGNED_BYTE;
+
+		if(b["format"].IsInt())
+		{
+			format = (GLenum) b["format"].GetInt();
+		}
+		if(b["internalFormat"].IsInt())
+		{
+			internalFormat = (GLenum) b["internalFormat"].GetInt();
+		}
+		if(b["type"].IsInt())
+		{
+	type = (GLenum) b["type"].GetInt();
+		}
+		Texture<GL_TEXTURE_2D> texture{NO_MIPMAPS, internalFormat, image->size()};
+		texture.upload(0, format, type, image->data());
+		textures_.emplace(name, std::move(texture));
+		
+		std::cout << __func__ << ":  Adding texture " << name << " " << (int) internalFormat << " " << (int) format << std::endl;
+	}
+}
+
+void ge::gl4::GLTF::loadVertexFormats(const rapidjson::Document &doc)
+{
+	if(!jsonContainsFields(doc, "extras"))
+	{
+		return;
+	}
+	
+	const auto &extras = doc["extras"];
+	if(!jsonContainsFields(extras, "vertexFormats"))
+	{
+		return;
+	}
+
+	for(auto it =  extras["vertexFormats"].MemberBegin(); it != extras["vertexFormats"].MemberEnd(); ++it)
+	{
+		const auto &b = it->value;
+		
+		if(!jsonContainsFields(b, "index", "componentCount", "componentType", "normalized", "byteOffset"))
+		{
+			continue;
+		}
+
+		auto name = it->name.GetString();
+		size_t byteOffset = b["byteOffset"].GetUint64();
+		size_t byteStride = 0;
+		auto componentType = (GLenum) b["componentType"].GetInt();
+		auto typeName = b["type"].GetString();
+
+		auto bufferView = bufferViews_.find(b["bufferView"].GetString());
+		if(bufferView == bufferViews_.end())
+		{
+			continue;
+		}
+
+		auto possibleComponentTypes = {"SCALAR", "VEC2", "VEC3", "VEC4"};
+		unsigned componentCount = std::distance(possibleComponentTypes.begin(), std::find_if(possibleComponentTypes.begin(), possibleComponentTypes.end(), [=](auto a) {return !strcmp(a, typeName);}));
+		if(componentCount == possibleComponentTypes.size())
+		{
+			continue;
+		}
+
+		vertexAttributes.emplace_back(name);
+
+		VertexFormat &format = vertexFormats_[name];
+		format.setAttributeFormat(vertexAttributes.size() - 1, componentCount, componentType, false, byteOffset);
+		format.bindBufferAsAttribute(bufferView->second.getBuffer(), vertexAttributes.size() - 1, bufferView->second.getRange().offset, byteStride);
+	}
+}

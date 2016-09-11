@@ -1,0 +1,48 @@
+#ifndef GE_OGL4_GLTF_H
+#define GE_OGL4_GLTF_H
+
+#include "BufferView.h"
+#include "Sampler.h"
+#include "internal/Buffer.h"
+#include "internal/ProgramPipeline.h"
+#include "internal/VertexFormat.h"
+#include "internal/Texture.h"
+#include <rapidjson/document.h>
+#include <unordered_map>
+
+namespace ge
+{
+	namespace gl4
+	{
+		class GLTF
+		{
+			public:
+			GLTF(const char *string);
+
+			private:
+			enum class UriType
+			{
+				ArrayBuffer,	// Referenced file
+				Text			// Embedded Base64
+			};
+
+			void loadBuffers(const rapidjson::Document &doc);
+			void loadBufferViews(const rapidjson::Document &doc);
+			void loadShaders(const rapidjson::Document &doc);
+			void loadPrograms(const rapidjson::Document &doc);
+			void loadSamplers(const rapidjson::Document &doc);
+			void loadTextures(const rapidjson::Document &doc);
+			void loadVertexFormats(const rapidjson::Document &doc);
+
+			std::unordered_map<std::string, Buffer> buffers_;
+			std::unordered_map<std::string, BufferView> bufferViews_;
+			std::unordered_map<std::string, VertexFormat> vertexFormats_;
+			std::unordered_map<std::string, Shader> shaders_;
+			std::unordered_map<std::string, ProgramPipeline> programs_;
+			std::unordered_map<std::string, Sampler> samplers_;
+			std::unordered_map<std::string, Texture<GL_TEXTURE_2D>> textures_;
+		};
+	}
+}
+
+#endif
