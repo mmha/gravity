@@ -35,7 +35,7 @@ namespace ge::gl4
 		auto id() const -> uint32_t;
 		auto type() const -> Type;
 	private:
-		uint32_t programID_;
+		GLuint programID_;
 		Type type_;
 	};
 }

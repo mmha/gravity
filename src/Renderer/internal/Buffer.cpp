@@ -3,15 +3,16 @@
 namespace ge::gl4
 {
 
-Buffer::Buffer(size_t size, const void *data)
+Buffer::Buffer(size_t size, const void *data, BufferStorageMask mask)
 : size_(size)
+, storageMask_{mask}
 {
 	glCreateBuffers(1, &vboID_);
-	glNamedBufferStorage(vboID_, size, data, GL_DYNAMIC_STORAGE_BIT | GL_MAP_READ_BIT | GL_MAP_WRITE_BIT);
+	glNamedBufferStorage(vboID_, size, data, storageMask_);
 }
 
 Buffer::Buffer(const Buffer &other)
-: Buffer(other.size())
+: Buffer(other.size(), nullptr, other.storageMask_)
 {
 	glCopyNamedBufferSubData(other.vboID_, vboID_, 0, 0, other.size_);
 }
@@ -20,6 +21,7 @@ Buffer::Buffer(Buffer &&other) noexcept
 {
 	vboID_ = other.vboID_;
 	size_  = other.size_;
+	storageMask_ = other.storageMask_;
 	other.vboID_ = 0;
 }
 
@@ -28,6 +30,7 @@ Buffer &Buffer::operator=(Buffer &&other) noexcept
 	glDeleteBuffers(1, &vboID_);
 	vboID_ = other.vboID_;
 	size_  = other.size_;
+	storageMask_ = other.storageMask_;
 	other.vboID_ = 0;
 	return *this;
 }

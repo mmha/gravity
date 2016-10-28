@@ -49,12 +49,12 @@ namespace ge::Core
 
 		constexpr auto operator[](E val) -> T &
 		{
-			return static_cast<base>(*this)[static_cast<std::underlying_type_t<E>>(val)];
+			return base::operator[](static_cast<std::underlying_type_t<E>>(val));
 		}
 
 		constexpr auto operator[](E val) const -> const T &
 		{
-			return static_cast<base>(*this)[static_cast<std::underlying_type_t<E>>(val)];
+			return base::operator[](static_cast<std::underlying_type_t<E>>(val));
 		}
 	};
 }

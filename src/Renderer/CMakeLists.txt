@@ -51,5 +51,4 @@ set_property(TARGET GERenderer PROPERTY VERSION ${PROJECT_VERSION})
 cotire(GERenderer)
 
 target_link_libraries(GERenderer PUBLIC GECore glbinding Threads::Threads gsl::gsl)
-
 gravity_export_target(GERenderer ${HEADER_FILES})

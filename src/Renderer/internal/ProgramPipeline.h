@@ -9,7 +9,19 @@ namespace ge::gl4
 	class ProgramPipeline
 	{
 	public:
-		using ShaderArray = Core::EnumArray<std::shared_ptr<Shader>, Shader::Type>;
+		enum class AttachedShaderIndex
+		{
+			Vertex,
+			Fragment,
+			Geometry,
+			TessellationControl,
+			TessellationEvaluation,
+			Compute,
+			COUNT,
+		};
+
+		using ShaderArray = Core::EnumArray<std::shared_ptr<Shader>, AttachedShaderIndex>;
+		static_assert((int) AttachedShaderIndex::COUNT == (int) Shader::Type::COUNT);
 
 		ProgramPipeline();
 		ProgramPipeline(const ProgramPipeline &other);
@@ -21,8 +33,8 @@ namespace ge::gl4
 		auto end() -> ShaderArray::iterator;
 		auto begin() const -> ShaderArray::const_iterator;
 		auto end() const  -> ShaderArray::const_iterator;
-		auto operator[](Shader::Type type) -> ShaderArray::reference;
-		auto operator[](Shader::Type type) const -> ShaderArray::const_reference;
+		auto operator[](AttachedShaderIndex type) -> ShaderArray::reference;
+		auto operator[](AttachedShaderIndex type) const -> ShaderArray::const_reference;
 
 		void attach(std::shared_ptr<Shader> shader);
 		

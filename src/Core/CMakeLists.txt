@@ -1,4 +1,4 @@
-find_package(Boost REQUIRED COMPONENTS system)
+find_package(Boost REQUIRED COMPONENTS system fiber)
 
 set(SOURCE_FILES
 		HTTPEventStreamBuf.cpp
@@ -20,7 +20,7 @@ set(HEADER_FILES
 		)
 
 add_library(GECore STATIC ${HEADER_FILES} ${SOURCE_FILES})
-target_link_libraries(GECore PUBLIC bibi::bibi lmi Boost::system gsl::gsl)
+target_link_libraries(GECore PUBLIC bibi::bibi lmi Boost::system Boost::fiber gsl::gsl)
 set_property(TARGET GECore PROPERTY VERSION ${PROJECT_VERSION})
 
 if(WIN32)

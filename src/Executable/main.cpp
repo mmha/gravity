@@ -86,10 +86,6 @@ auto main() -> int
 	ge::gl4::setGLDebugOutputStream(std::cout);
 	ge::gl4::enableGLDebugOuput();
 
-	ge::gl4::glEnable(gl::GL_CONSERVATIVE_RASTERIZATION_NV);
-	auto err = ge::gl4::glGetError();
-	std::cout << (err == 0) << "\n"; 
-
 	auto tri = std::experimental::make_array
 	(
 		lmi::vec2{-0.5, -0.5},

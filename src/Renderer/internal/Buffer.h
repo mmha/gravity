@@ -10,7 +10,7 @@ namespace ge::gl4
 	class Buffer
 	{
 	public:
-		explicit Buffer(size_t size, const void *data = nullptr);
+		explicit Buffer(size_t size, const void *data = nullptr, BufferStorageMask mask = GL_DYNAMIC_STORAGE_BIT | GL_MAP_READ_BIT | GL_MAP_WRITE_BIT);
 		Buffer(const Buffer &other);
 		Buffer(Buffer &&other) noexcept;
 		Buffer &operator=(Buffer &&other) noexcept;
@@ -46,6 +46,7 @@ namespace ge::gl4
 		auto operator!=(const Buffer &rhs) const -> bool;
 	protected:
 		uint32_t vboID_;
+		BufferStorageMask storageMask_;
 		size_t size_;
 	};
 }
